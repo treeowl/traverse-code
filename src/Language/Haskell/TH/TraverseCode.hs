@@ -19,7 +19,6 @@ module Language.Haskell.TH.TraverseCode
 import Generics.Linear
 import Language.Haskell.TH.Syntax (Code, Lift (..), Exp (..), Quote, Name)
 import qualified Language.Haskell.TH.Syntax as TH
---import qualified Language.Haskell.TH.Lib as TH
 import Language.Haskell.TH.Lib (conE)
 import Data.Kind (Type)
 
@@ -31,18 +30,25 @@ import qualified Data.Sequence.Internal as Seq
 import Data.Coerce
 import Control.Applicative
 
+-- | Containers supporting \"traversal\" in 'Code'.
 class TraverseCode t where
+  -- | Given a container and a function to fill it with splices,
+  -- produce a splice that will generate a container of their results.
   traverseCode :: Quote m => (a -> Code m b) -> t a -> Code m (t b)
 
   default traverseCode :: (Quote m, GTraverseCode (Rep1 t), Generic1 t) => (a -> Code m b) -> t a -> Code m (t b)
   traverseCode = genericTraverseCode
 
+-- | Given a container of splices, produce a splice that will generate a
+-- container of their results.
 sequenceCode :: (TraverseCode t, Quote m) => t (Code m a) -> Code m (t a)
 sequenceCode = traverseCode id
 
+-- | Like 'sequenceCode', but using the @"Generics.Linear".'Generic1'@ instance.
 genericSequenceCode :: (Quote m, GTraverseCode (Rep1 t), Generic1 t) => t (Code m a) -> Code m (t a)
 genericSequenceCode = TH.unsafeCodeCoerce . gtraverseCode id . from1
 
+-- | Like 'traverseCode', but using the @"Generics.Linear".'Generic1'@ instance.
 genericTraverseCode :: (Quote m, GTraverseCode (Rep1 t), Generic1 t) => (a -> Code m b) -> t a -> Code m (t b)
 genericTraverseCode f = TH.unsafeCodeCoerce . gtraverseCode f . from1
 
