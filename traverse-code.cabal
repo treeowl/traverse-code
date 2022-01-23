@@ -2,6 +2,8 @@ cabal-version:      2.2
 name:               traverse-code
 version:            0.1.0.0
 synopsis:           General data structure lifting for Template Haskell
+tested-with:
+    GHC ==9.0.1 || ==9.2.1
 
 -- A longer description of the package.
 description:
@@ -35,7 +37,7 @@ library
 
     -- TODO: figure out a base version; make things work with
     -- older Template Haskell
-    build-depends:    base >=4.12.0.0
+    build-depends:    base >=4.15.0.0 && < 4.17
                     , template-haskell >= 2.16
                     , containers
                     , linear-generics
@@ -47,8 +49,6 @@ test-suite traverse-code-test
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          TraverseCodeTest.hs
-    other-modules:
-      Hmph
     build-depends:
         base
       , template-haskell
