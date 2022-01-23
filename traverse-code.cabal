@@ -13,14 +13,13 @@ description:
 homepage:           https://github.com/treeowl/traverse-code
 
 -- A URL where users can report bugs.
--- bug-reports:
+bug-reports: https://github.com/treeowl/traverse-code/issues
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             David Feuer
 maintainer:         David.Feuer@gmail.com
 
--- A copyright notice.
--- copyright:
+copyright:          2022 David Feuer
 category:           Language
 extra-source-files: CHANGELOG.md
 
@@ -35,8 +34,6 @@ library
     other-extensions:
       TemplateHaskellQuotes
 
-    -- TODO: figure out a base version; make things work with
-    -- older Template Haskell
     build-depends:    base >=4.15.0.0 && < 4.17
                     , template-haskell >= 2.16
                     , containers

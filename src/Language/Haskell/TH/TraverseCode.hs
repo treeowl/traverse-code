@@ -1,11 +1,8 @@
-{-# options_ghc -Wall #-}
 {-# language TemplateHaskellQuotes #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language ScopedTypeVariables #-}
-{-# language KindSignatures #-}
 {-# language DataKinds #-}
-{-# language TypeApplications #-}
 {-# language TypeOperators #-}
 {-# language EmptyCase #-}
 {-# language DefaultSignatures #-}
@@ -21,7 +18,6 @@ import Generics.Linear
 import Language.Haskell.TH.Syntax (Code, Lift (..), Exp (..), Quote, Name)
 import qualified Language.Haskell.TH.Syntax as TH
 import Language.Haskell.TH.Lib (conE)
-import Data.Kind (Type)
 
 -- for instances
 import qualified Data.Functor.Product as FProd
@@ -70,13 +66,11 @@ genericTraverseCode f = TH.unsafeCodeCoerce . gtraverseCode f . from1
 class GTraverseCode f where
   gtraverseCode :: Quote m => (a -> Code m b) -> f a -> m Exp
 
-data Goop (d :: Meta) (f :: Type -> Type) a = Goop
-
 instance (Datatype c, GTraverseCodeCon f) => GTraverseCode (D1 c f) where
-  gtraverseCode f (M1 x) = gtraverseCodeCon pkg modl f x
+  gtraverseCode f m@(M1 x) = gtraverseCodeCon pkg modl f x
     where
-      pkg = packageName (Goop @c @f)
-      modl = moduleName (Goop @c @f)
+      pkg = packageName m
+      modl = moduleName m
 
 class GTraverseCodeCon f where
   gtraverseCodeCon :: Quote m => String -> String -> (a -> Code m b) -> f a -> m Exp
@@ -90,9 +84,9 @@ instance (GTraverseCodeCon f, GTraverseCodeCon g) => GTraverseCodeCon (f :+: g) 
   gtraverseCodeCon pkg modl f (R1 y) = gtraverseCodeCon pkg modl f y
 
 instance (Constructor c, GTraverseCodeFields f) => GTraverseCodeCon (C1 c f) where
-  gtraverseCodeCon pkg modl f (M1 x) = gtraverseCodeFields (conE conN) f x
+  gtraverseCodeCon pkg modl f m@(M1 x) = gtraverseCodeFields (conE conN) f x
     where
-      conBase = conName (Goop @c @f)
+      conBase = conName m
       conN :: Name
       conN = TH.mkNameG_d pkg modl conBase
 
