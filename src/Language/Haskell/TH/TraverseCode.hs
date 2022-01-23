@@ -9,6 +9,7 @@
 {-# language TypeOperators #-}
 {-# language EmptyCase #-}
 {-# language DefaultSignatures #-}
+{-# language BangPatterns #-}
 
 module Language.Haskell.TH.TraverseCode
   ( TraverseCode (..)
@@ -29,6 +30,20 @@ import Data.Functor.Identity
 import qualified Data.Sequence.Internal as Seq
 import Data.Coerce
 import Control.Applicative
+import qualified Data.Semigroup as S
+import qualified Data.Monoid as M
+import qualified Data.Complex as Complex
+import qualified Data.Ord as Ord
+import qualified Data.Functor.Compose as Compose
+import qualified Data.Tree as Tree
+import qualified Data.List.NonEmpty as NonEmpty
+import GHC.Tuple (Solo)
+import Data.Proxy (Proxy)
+import qualified GHC.Generics as GHCGenerics
+import qualified Data.Array as Ar
+import qualified Data.Primitive.Array as PAr
+import qualified Data.Primitive.SmallArray as PSmAr
+import Data.Foldable (toList)
 
 -- | Containers supporting \"traversal\" in 'Code'.
 class TraverseCode t where
@@ -104,13 +119,39 @@ instance (GTraverseCodeFields f, TraverseCode g) => GTraverseCodeFields (f :.: g
   gtraverseCodeFields cc f (Comp1 x) =
     gtraverseCodeFields cc (traverseCode f) x
 
+instance GTraverseCodeFields (URec Char) where
+  gtraverseCodeFields c _f (UChar ch) = [| $c (UChar ch) |]
+
+instance GTraverseCodeFields (URec Float) where
+  gtraverseCodeFields c _f (UFloat ch) = [| $c (UFloat ch) |]
+
+instance GTraverseCodeFields (URec Double) where
+  gtraverseCodeFields c _f (UDouble ch) = [| $c (UDouble ch) |]
+
+instance GTraverseCodeFields (URec Int) where
+  gtraverseCodeFields c _f (UInt ch) = [| $c (UInt ch) |]
+
+instance GTraverseCodeFields (URec Word) where
+  gtraverseCodeFields c _f (UWord ch) = [| $c (UWord ch) |]
+
+instance GTraverseCodeFields f => GTraverseCodeFields (MP1 m f) where
+  gtraverseCodeFields c f (MP1 x) = gtraverseCodeFields c f x
+
+-- Would an instance for URec (Ptr ()) make any sense?
+
 -- TraverseCode instances
 
 instance TraverseCode Maybe
 instance TraverseCode Identity
 instance TraverseCode []
 instance TH.Lift a => TraverseCode (Either a)
+
 instance TH.Lift a => TraverseCode ((,) a)
+instance (TH.Lift a, TH.Lift b) => TraverseCode ((,,) a b)
+instance (TH.Lift a, TH.Lift b, TH.Lift c) => TraverseCode ((,,,) a b c)
+instance (TH.Lift a, TH.Lift b, TH.Lift c, TH.Lift d) => TraverseCode ((,,,,) a b c d)
+instance (TH.Lift a, TH.Lift b, TH.Lift c, TH.Lift d, TH.Lift e) => TraverseCode ((,,,,,) a b c d e)
+
 instance (TraverseCode f, TraverseCode g) => TraverseCode (FProd.Product f g)
 instance (TraverseCode f, TraverseCode g) => TraverseCode (FSum.Sum f g)
 instance Lift a => TraverseCode (Const a)
@@ -122,6 +163,11 @@ instance (TraverseCode f, TraverseCode g) => TraverseCode (f :+: g)
 instance TraverseCode f => TraverseCode (M1 i c f)
 instance TraverseCode Par1
 instance Lift a => TraverseCode (K1 i a)
+instance (TraverseCode f, TraverseCode g) => TraverseCode (f :.: g)
+instance (TraverseCode f, TraverseCode g) => TraverseCode (Compose.Compose f g)
+instance TraverseCode f => TraverseCode (MP1 m f)
+instance TraverseCode f => TraverseCode (GHCGenerics.Rec1 f)
+instance (TraverseCode f, TraverseCode g) => TraverseCode (f GHCGenerics.:.: g)
 
 -- The Elem instance isn't needed for the Seq instance
 instance TraverseCode Seq.Elem
@@ -134,7 +180,90 @@ instance TraverseCode Seq.Seq where
   traverseCode f s = [|| coerceFT $$(traverseCode f ft') ||]
     where
       ft' = coerceSeq (Seq.zipWith (flip const) (Seq.replicate (Seq.length s) ()) s)
+
 coerceFT :: Seq.FingerTree a -> Seq.Seq a
 coerceFT = coerce
 coerceSeq :: Seq.Seq a -> Seq.FingerTree a
 coerceSeq = coerce
+
+instance TraverseCode Seq.ViewL
+instance TraverseCode Seq.ViewR
+
+instance TraverseCode ZipList
+instance TraverseCode Complex.Complex
+instance TraverseCode S.First
+instance TraverseCode M.First
+instance TraverseCode S.Last
+instance TraverseCode M.Last
+instance TraverseCode S.Min
+instance TraverseCode S.Max
+instance TraverseCode Ord.Down
+instance TraverseCode S.WrappedMonoid
+instance TraverseCode S.Dual
+instance TraverseCode S.Product
+instance TraverseCode S.Sum
+instance TraverseCode Solo
+instance TraverseCode Tree.Tree
+instance TraverseCode NonEmpty.NonEmpty
+-- instance TraverseCode TH.TyVarBndr  (Lift Name isn't in base)
+instance TraverseCode m => TraverseCode (WrappedMonad m)
+instance TraverseCode (p a) => TraverseCode (WrappedArrow p a)
+instance TH.Lift a => TraverseCode (S.Arg a)
+instance TraverseCode Proxy
+instance TraverseCode f => TraverseCode (M.Ap f)
+instance TraverseCode f => TraverseCode (M.Alt f)
+instance TraverseCode (URec Char)
+instance TraverseCode (URec Double)
+instance TraverseCode (URec Float)
+instance TraverseCode (URec Int)
+instance TraverseCode (URec Word)
+
+instance (Ar.Ix i, TH.Lift i) => TraverseCode (Ar.Array i) where
+  traverseCode f xs = [|| Ar.listArray bnds $$csc ||]
+    where
+      csc = traverseCode f (Ar.elems xs)
+      bnds = Ar.bounds xs
+
+instance TraverseCode PAr.Array where
+  traverseCode f ary = case lst of
+      [] -> [|| PAr.emptyArray ||]
+      [x] -> [|| pure $$(f x) ||]
+      x : xs -> [|| unsafeArrayFromListN len $$(f x) $$(traverseCode f xs) ||]
+    where
+      len = length ary
+      lst = toList ary
+
+instance TraverseCode PSmAr.SmallArray where
+  traverseCode f ary = case lst of
+      [] -> [|| PSmAr.emptySmallArray ||]
+      [x] -> [|| pure $$(f x) ||]
+      x : xs -> [|| unsafeSmallArrayFromListN len $$(f x) $$(traverseCode f xs) ||]
+    where
+      len = length ary
+      lst = toList ary
+
+-- | Strictly create an array from a nonempty list (represented as
+-- a first element and a list of the rest) of a known length. If the length
+-- of the list does not match the given length, this makes demons fly
+-- out of your nose.
+unsafeArrayFromListN :: Int -> a -> [a] -> PAr.Array a
+unsafeArrayFromListN n y ys =
+  PAr.createArray n y $ \ma ->
+    let go !_ix [] = pure ()
+        go !ix (x : xs) = do
+            PAr.writeArray ma ix x
+            go (ix+1) xs
+    in go 1 ys
+
+-- | Strictly create an array from a nonempty list (represented as
+-- a first element and a list of the rest) of a known length. If the length
+-- of the list does not match the given length, this makes demons fly
+-- out of your nose.
+unsafeSmallArrayFromListN :: Int -> a -> [a] -> PSmAr.SmallArray a
+unsafeSmallArrayFromListN n y ys =
+  PSmAr.createSmallArray n y $ \ma ->
+    let go !_ix [] = pure ()
+        go !ix (x : xs) = do
+            PSmAr.writeSmallArray ma ix x
+            go (ix+1) xs
+    in go 1 ys
