@@ -1,12 +1,12 @@
-{-# language TemplateHaskellQuotes #-}
+{-# language BangPatterns #-}
+{-# language DataKinds #-}
+{-# language DefaultSignatures #-}
+{-# language EmptyCase #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language ScopedTypeVariables #-}
-{-# language DataKinds #-}
+{-# language TemplateHaskellQuotes #-}
 {-# language TypeOperators #-}
-{-# language EmptyCase #-}
-{-# language DefaultSignatures #-}
-{-# language BangPatterns #-}
 
 module Language.Haskell.TH.TraverseCode
   ( TraverseCode (..)
@@ -24,6 +24,8 @@ import qualified Data.Functor.Product as FProd
 import qualified Data.Functor.Sum as FSum
 import Data.Functor.Identity
 import qualified Data.Sequence.Internal as Seq
+import qualified Data.Map.Internal as Map
+import qualified Data.IntMap.Internal as IM
 import Data.Coerce
 import Control.Applicative
 import qualified Data.Semigroup as S
@@ -40,6 +42,9 @@ import qualified Data.Array as Ar
 import qualified Data.Primitive.Array as PAr
 import qualified Data.Primitive.SmallArray as PSmAr
 import Data.Foldable (toList)
+import Control.Monad.Trans.Identity (IdentityT (..))
+import qualified Control.Monad.Trans.Writer.Strict as WriterS
+import qualified Control.Monad.Trans.Writer.Lazy as WriterL
 
 -- | Containers supporting \"traversal\" in 'Code'.
 class TraverseCode t where
@@ -47,7 +52,9 @@ class TraverseCode t where
   -- produce a splice that will generate a container of their results.
   traverseCode :: Quote m => (a -> Code m b) -> t a -> Code m (t b)
 
-  default traverseCode :: (Quote m, GTraverseCode (Rep1 t), Generic1 t) => (a -> Code m b) -> t a -> Code m (t b)
+  -- Note: The Generic1 constraint needs to come first to get a decent
+  -- error message when that instance is missing. Why? No idea.
+  default traverseCode :: (Generic1 t, Quote m, GTraverseCode (Rep1 t)) => (a -> Code m b) -> t a -> Code m (t b)
   traverseCode = genericTraverseCode
 
 -- | Given a container of splices, produce a splice that will generate a
@@ -137,6 +144,14 @@ instance GTraverseCodeFields f => GTraverseCodeFields (MP1 m f) where
 
 instance TraverseCode Maybe
 instance TraverseCode Identity
+instance TraverseCode m => TraverseCode (IdentityT m) where
+  traverseCode f (IdentityT m) = [|| IdentityT $$(traverseCode f m) ||]
+instance (TraverseCode m, Lift w) => TraverseCode (WriterS.WriterT w m) where
+  traverseCode f (WriterS.WriterT m) =
+    [|| WriterS.WriterT $$(traverseCode (\(a, w) -> [|| ($$(f a), w) ||]) m) ||]
+instance (TraverseCode m, Lift w) => TraverseCode (WriterL.WriterT w m) where
+  traverseCode f (WriterL.WriterT m) =
+    [|| WriterL.WriterT $$(traverseCode (\(a, w) -> [|| ($$(f a), w) ||]) m) ||]
 instance TraverseCode []
 instance TH.Lift a => TraverseCode (Either a)
 
@@ -162,6 +177,18 @@ instance (TraverseCode f, TraverseCode g) => TraverseCode (Compose.Compose f g)
 instance TraverseCode f => TraverseCode (MP1 m f)
 instance TraverseCode f => TraverseCode (GHCGenerics.Rec1 f)
 instance (TraverseCode f, TraverseCode g) => TraverseCode (f GHCGenerics.:.: g)
+
+instance Lift k => TraverseCode (Map.Map k) where
+  traverseCode _ Map.Tip = [|| Map.Tip ||]
+  traverseCode f (Map.Bin s k v l r) =
+    [|| Map.Bin s k $$(f v) $$(traverseCode f l) $$(traverseCode f r) ||]
+
+instance TraverseCode IM.IntMap where
+  traverseCode _f IM.Nil = [|| IM.Nil ||]
+  traverseCode f (IM.Tip k v) = [|| IM.Tip k $$(f v) ||]
+  traverseCode f (IM.Bin p m l r)
+    | m < 0 = [|| flip (IM.Bin p m) $$(traverseCode f r) $$(traverseCode f l) ||]
+    | otherwise = [|| IM.Bin p m $$(traverseCode f l) $$(traverseCode f r) ||]
 
 -- The Elem instance isn't needed for the Seq instance
 instance TraverseCode Seq.Elem
